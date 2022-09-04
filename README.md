@@ -276,7 +276,6 @@ Thanks for open-sourcing!
       archivePrefix={arXiv},
       primaryClass={cs.CV}
 }
-
 ```
 
 

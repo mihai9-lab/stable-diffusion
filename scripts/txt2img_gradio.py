@@ -18,6 +18,14 @@ from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 
+def get_device():
+    if(torch.cuda.is_available()):
+        return torch.device("cuda")
+    elif(torch.backends.mps.is_available()):
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
@@ -104,7 +112,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.cuda()
+    model.to(get_device())
     model.eval()
     return model
 
@@ -126,11 +134,12 @@ def load_img(path):
 config = OmegaConf.load("configs/stable-diffusion/v1-inference.yaml")
 model = load_model_from_config(config, "models/ldm/stable-diffusion-v1/model.ckpt")
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+device = get_device()
 model = model.half().to(device)
 
 def dream(prompt: str, ddim_steps: int, plms: bool, fixed_code: bool, ddim_eta: float, n_iter: int, n_samples: int, cfg_scale: float, seed: int, height: int, width: int):
-    torch.cuda.empty_cache()
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     opt.H = height
     opt.W = width
@@ -169,9 +178,11 @@ def dream(prompt: str, ddim_steps: int, plms: bool, fixed_code: bool, ddim_eta: 
         start_code = torch.randn([n_samples, opt.C, opt.H // opt.f, opt.W // opt.f], device=device)
 
     precision_scope = autocast if opt.precision=="autocast" else nullcontext
+    if device.type == 'mps':
+        precision_scope = nullcontext # have to use f32 on mps
     output_images = []
     with torch.no_grad():
-        with precision_scope("cuda"):
+        with precision_scope(device.type):
             with model.ema_scope():
                 tic = time.time()
                 all_samples = list()
@@ -224,7 +235,8 @@ def dream(prompt: str, ddim_steps: int, plms: bool, fixed_code: bool, ddim_eta: 
     return output_images, rng_seed
 
 def translation(prompt: str, init_img, ddim_steps: int, ddim_eta: float, n_iter: int, n_samples: int, cfg_scale: float, denoising_strength: float, seed: int, height: int, width: int):
-    torch.cuda.empty_cache()
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
     rng_seed = seed_everything(seed)
 
     sampler = DDIMSampler(model)
@@ -263,8 +275,11 @@ def translation(prompt: str, init_img, ddim_steps: int, ddim_eta: float, n_iter:
 
     output_images = []
     precision_scope = autocast if opt.precision == "autocast" else nullcontext
+    if device.type == 'mps':
+        precision_scope = nullcontext # have to use f32 on mps
+
     with torch.no_grad():
-        with precision_scope("cuda"):
+        with precision_scope(device.type):
             init_image = 2.*image - 1.
             init_image = init_image.to(device)
             init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)

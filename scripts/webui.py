@@ -134,6 +134,15 @@ elif grid_format[0] == 'webp':
         grid_quality = abs(grid_quality)
 
 
+def get_device():
+    if(torch.cuda.is_available()):
+        return torch.device("cuda")
+    elif(torch.backends.mps.is_available()):
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
 def chunk(it, size):
     it = iter(it)
     return iter(lambda: tuple(islice(it, size)), ())
@@ -154,7 +163,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.cuda()
+    model.to(get_device())
     model.eval()
     return model
 
@@ -286,8 +295,10 @@ def create_random_tensors(shape, seeds):
     return x
 
 def torch_gc():
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
+    if get_device().type == 'cuda':
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
 def load_LDSR(checking=False):
     model_name = 'model'
     yaml_name = 'project'
@@ -413,7 +424,7 @@ def load_SD_model():
             sd['model2.' + key[6:]] = sd.pop(key)
 
         config = OmegaConf.load("optimizedSD/v1-inference.yaml")
-        device = torch.device(f"cuda:{opt.gpu}") if torch.cuda.is_available() else torch.device("cpu")
+        device = torch.device(f"cuda:{opt.gpu}") if torch.cuda.is_available() else get_device()
 
         model = instantiate_from_config(config.modelUNet)
         _, _ = model.load_state_dict(sd, strict=False)
@@ -441,7 +452,7 @@ def load_SD_model():
         config = OmegaConf.load(opt.config)
         model = load_model_from_config(config, opt.ckpt)
 
-        device = torch.device(f"cuda:{opt.gpu}") if torch.cuda.is_available() else torch.device("cpu")
+        device = torch.device(f"cuda:{opt.gpu}") if torch.cuda.is_available() else get_device()
         model = (model if opt.no_half else model.half()).to(device)
     return model, device,config
 
@@ -849,7 +860,9 @@ def process_images(
         output_images = []
     grid_captions = []
     stats = []
-    with torch.no_grad(), precision_scope("cuda"), (model.ema_scope() if not opt.optimized else nullcontext()):
+    if get_device().type == 'mps':
+        precision_scope = nullcontext # have to use f32 on mps
+    with torch.no_grad(), precision_scope(get_device().type), (model.ema_scope() if not opt.optimized else nullcontext()):
         init_data = func_init()
         tic = time.time()
 

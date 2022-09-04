@@ -12,6 +12,14 @@ from ldm.util import instantiate_from_config
 
 rescale = lambda x: (x + 1.) / 2.
 
+def get_device():
+    if(torch.cuda.is_available()):
+        return torch.device("cuda")
+    elif(torch.backends.mps.is_available()):
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
 def custom_to_pil(x):
     x = x.detach().cpu()
     x = torch.clamp(x, -1., 1.)
@@ -220,7 +228,7 @@ def get_parser():
 def load_model_from_config(config, sd):
     model = instantiate_from_config(config)
     model.load_state_dict(sd,strict=False)
-    model.cuda()
+    model.to(get_device())
     model.eval()
     return model
 

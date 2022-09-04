@@ -21,6 +21,14 @@ from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 
+def get_device():
+    if(torch.cuda.is_available()):
+        return torch.device("cuda")
+    elif(torch.backends.mps.is_available()):
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
 
 def chunk(it, size):
     it = iter(it)
@@ -42,7 +50,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.cuda()
+    model.to(get_device())
     model.eval()
     return model
 
@@ -81,7 +89,8 @@ model = model.half()
 #model = model.half().to(device)
 
 def dream(prompt: str, ddim_steps: int, plms: bool, fixed_code: bool, ddim_eta: float, n_iter: int, n_samples: int, cfg_scale: float, seed: int, height: int, width: int):
-    torch.cuda.empty_cache()
+    if get_device().type == "cuda":
+        torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
 
     #parser.add_argument(
@@ -271,8 +280,10 @@ def dream(prompt: str, ddim_steps: int, plms: bool, fixed_code: bool, ddim_eta: 
     precision_scope = autocast if opt.precision=="autocast" else nullcontext
     output_images = []
     #print(f"DEBUG: accelerator.is_main_process is {accelerator.is_main_process}")
+    if get_device().type == 'mps':
+        precision_scope = nullcontext #
     with torch.no_grad():
-        with precision_scope("cuda"):
+        with precision_scope(get_device().type):
             with model.ema_scope():
                 tic = time.time()
                 all_samples = list()
