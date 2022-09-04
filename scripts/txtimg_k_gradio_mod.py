@@ -24,6 +24,13 @@ from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 
+def get_device():
+    if(torch.cuda.is_available()):
+        return torch.device("cuda")
+    elif(torch.backends.mps.is_available()):
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
 
 # fill these in if you have a preference
 # too lazy to bother with command line parameters
@@ -55,7 +62,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.cuda()
+    model.to(get_device())
     model.eval()
     return model
 
@@ -71,8 +78,9 @@ class CFGDenoiser(nn.Module):
         return uncond + (cond - uncond) * cond_scale
 
 def torch_gc():
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
+    if get_device().type == 'cuda':
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 def seed_to_int(s):
     if s == 'random':
@@ -130,7 +138,7 @@ class MemUsageMonitor(threading.Thread):
 config = OmegaConf.load("configs/stable-diffusion/v1-inference.yaml")
 model = load_model_from_config(config, "models/ldm/stable-diffusion-v1/model.ckpt")
 
-device = torch.device("cuda")
+device = get_device()
 model = model.half().to(device)
 
 def dream(prompt: str, ddim_steps: int, cfg_sampler: int, toggles: list, ddim_eta: float, n_iter: int, n_samples: int, cfg_scale: float, seed: str, width: int, height: int, channels: int, _):
@@ -285,10 +293,11 @@ def dream(prompt: str, ddim_steps: int, cfg_sampler: int, toggles: list, ddim_et
 
     precision_scope = autocast if opt.precision=="autocast" else nullcontext
     output_images = []
-
+    if device.type == 'mps':
+        precision_scope = nullcontext # have to use f32 on mps
     try:
         with torch.no_grad():
-            with precision_scope("cuda"):
+            with precision_scope(get_device().type):
                 with model.ema_scope():
                     tic = time.time()
                     all_samples = list()
@@ -518,10 +527,11 @@ def translation(prompt: str, init_img, ddim_steps: int, cfg_sampler: int, toggle
 
     output_images = []
     precision_scope = autocast if opt.precision == "autocast" else nullcontext
-
+    if device.type == 'mps':
+        precision_scope = nullcontext # have to use f32 on mps
     try:
         with torch.no_grad():
-            with precision_scope("cuda"):
+            with precision_scope(get_device().type):
                 init_image = 2.*image - 1.
                 init_image = init_image.to(device)
                 init_image = repeat(init_image, '1 ... -> b ...', b=batch_size)

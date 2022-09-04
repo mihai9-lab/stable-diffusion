@@ -24,6 +24,14 @@ from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 
+def get_device():
+    if(torch.cuda.is_available()):
+        return torch.device("cuda")
+    elif(torch.backends.mps.is_available()):
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--txt2img_outdir",
@@ -71,7 +79,7 @@ def load_model_from_config(config, ckpt, verbose=False):
         print("unexpected keys:")
         print(u)
 
-    model.cuda()
+    model.to(get_device())
     model.eval()
     return model
 
@@ -87,8 +95,9 @@ class CFGDenoiser(nn.Module):
         return uncond + (cond - uncond) * cond_scale
 
 def torch_gc():
-    torch.cuda.empty_cache()
-    torch.cuda.ipc_collect()
+    if get_device().type == 'cuda':
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 def seed_to_int(s):
     if s == '':
@@ -148,7 +157,7 @@ class MemUsageMonitor(threading.Thread):
 config = OmegaConf.load("configs/stable-diffusion/v1-inference.yaml")
 model = load_model_from_config(config, "models/ldm/stable-diffusion-v1/model.ckpt")
 
-device = torch.device("cuda")
+device = get_device()
 model = model.half().to(device)
 
 def unified(prompt: str, init_img, ddim_steps: int, sampler_index: int, toggles: list, ddim_eta: float, n_iter: int, n_samples: int, cfg_scale: float, denoising_strength: float, seed: str, width: int, height: int, channels: int, _):
@@ -213,6 +222,8 @@ def unified(prompt: str, init_img, ddim_steps: int, sampler_index: int, toggles:
 
     #precision_scope = autocast if opt.precision=="autocast" else nullcontext
     precision_scope = autocast
+    if device.type == 'mps':
+        precision_scope = nullcontext # have to use f32 on mps
     output_images = []
 
     if img2img_mode:
@@ -233,7 +244,7 @@ def unified(prompt: str, init_img, ddim_steps: int, sampler_index: int, toggles:
         w, h = width, height
 
     try:
-        with torch.no_grad(), precision_scope("cuda"):
+        with torch.no_grad(), precision_scope(device.type):
             if img2img_mode:
                 init_image = 2.*image - 1.
                 init_image = init_image.to(device)
